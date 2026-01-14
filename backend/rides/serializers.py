@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import DriverLocation, Ride, Message
+from .models import DriverLocation, Ride, Message, RideBid
 
 class MessageSerializer(serializers.ModelSerializer):
     sender = serializers.CharField(source='sender.username', read_only=True)
@@ -8,6 +8,12 @@ class MessageSerializer(serializers.ModelSerializer):
         model = Message
         fields = ['id', 'sender', 'content', 'created_at']
 
+class RideBidSerializer(serializers.ModelSerializer):
+    driver_name = serializers.CharField(source='driver.username', read_only=True)
+
+    class Meta:
+        model = RideBid
+        fields = ['id', 'driver_name', 'amount', 'status', 'created_at']
 
 class DriverLocationSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source='user.username', read_only=True)
@@ -19,11 +25,12 @@ class DriverLocationSerializer(serializers.ModelSerializer):
 class RideSerializer(serializers.ModelSerializer):
     passenger = serializers.StringRelatedField(read_only=True)
     driver = serializers.StringRelatedField(read_only=True)
+    bids = RideBidSerializer(many=True, read_only=True)
     
     class Meta:
         model = Ride
         fields = '__all__'
-        read_only_fields = ('passenger', 'driver', 'status', 'created_at', 'updated_at')
+        read_only_fields = ('passenger', 'driver', 'status', 'created_at', 'updated_at', 'bids')
 
     def create(self, validated_data):
         # Assign current user as passenger

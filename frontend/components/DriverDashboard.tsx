@@ -39,14 +39,14 @@ export default function DriverDashboard() {
         return () => clearInterval(interval);
     }, []);
 
-    const handleAcceptRide = async (rideId: number) => {
+    const handlePlaceBid = async (rideId: number, amount: number) => {
         try {
-            await api.patch(`/rides/${rideId}/accept/`);
-            setStatusMessage(`Ride #${rideId} accepted!`);
-            fetchRides();
+            await api.post(`/rides/${rideId}/bid/`, { amount });
+            setStatusMessage(`Bid of BDT ${amount} placed for Ride #${rideId}`);
+            // Don't refresh rides immediately, as the ride is still technically "requested" until passenger accepts
         } catch (err) {
-            console.error("Failed to accept ride", err);
-            setStatusMessage("Failed to accept ride.");
+            console.error("Failed to place bid", err);
+            setStatusMessage("Failed to place bid.");
         }
     };
 
@@ -255,7 +255,7 @@ export default function DriverDashboard() {
                                                     </span>
                                                     {ride.estimated_fare && (
                                                         <span className="text-green-600 font-bold text-sm">
-                                                            BDT {ride.estimated_fare}
+                                                            Est: BDT {ride.estimated_fare}
                                                         </span>
                                                     )}
                                                 </div>
@@ -266,17 +266,33 @@ export default function DriverDashboard() {
                                             <p className="text-sm text-gray-600 mb-1">
                                                 <span className="font-medium">Dropoff:</span> {ride.dropoff_address}
                                             </p>
-                                            {ride.distance_km && (
-                                                <p className="text-xs text-gray-500 mb-3">
-                                                    Distance: {ride.distance_km} km ({ride.duration_minutes} min)
-                                                </p>
-                                            )}
-                                            <button
-                                                onClick={() => handleAcceptRide(ride.id)}
-                                                className="w-full py-2 bg-black text-white text-sm font-medium rounded hover:bg-gray-800 transition"
-                                            >
-                                                Accept Ride
-                                            </button>
+
+                                            {/* Bidding UI */}
+                                            <div className="mt-3 pt-3 border-t border-gray-200">
+                                                <p className="text-xs text-gray-500 mb-2">Offer your fare:</p>
+                                                <div className="flex gap-2">
+                                                    <input
+                                                        type="number"
+                                                        placeholder={ride.estimated_fare}
+                                                        className="w-full px-3 py-2 border rounded text-sm"
+                                                        id={`bid-amount-${ride.id}`}
+                                                    />
+                                                    <button
+                                                        onClick={() => {
+                                                            const input = document.getElementById(`bid-amount-${ride.id}`) as HTMLInputElement;
+                                                            if (input && input.value) {
+                                                                handlePlaceBid(ride.id, parseFloat(input.value));
+                                                            } else if (ride.estimated_fare) {
+                                                                // Default to estimated fare if empty
+                                                                handlePlaceBid(ride.id, parseFloat(ride.estimated_fare));
+                                                            }
+                                                        }}
+                                                        className="px-4 py-2 bg-black text-white text-sm font-medium rounded hover:bg-gray-800 transition whitespace-nowrap"
+                                                    >
+                                                        Bid
+                                                    </button>
+                                                </div>
+                                            </div>
                                         </div>
                                     ))
                                 )}

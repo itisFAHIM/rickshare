@@ -1,8 +1,8 @@
 from rest_framework import generics, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from .models import DriverLocation, Ride, Message
-from .serializers import DriverLocationSerializer, RideSerializer, MessageSerializer
+from .models import DriverLocation, Ride, Message, RideBid
+from .serializers import DriverLocationSerializer, RideSerializer, MessageSerializer, RideBidSerializer
 from .services import calculate_fare
 
 class DriverLocationView(generics.ListCreateAPIView):
@@ -98,6 +98,58 @@ class RideViewSet(viewsets.ModelViewSet):
         ride.status = 'accepted'
         ride.save()
         
+        return Response(RideSerializer(ride).data)
+
+    @action(detail=True, methods=['post'])
+    def bid(self, request, pk=None):
+        ride = self.get_object()
+        user = request.user
+
+        if user.role != 'driver':
+            return Response({"error": "Only drivers can bid"}, status=status.HTTP_403_FORBIDDEN)
+        
+        if ride.status != 'requested':
+            return Response({"error": "Ride is not available for bidding"}, status=status.HTTP_400_BAD_REQUEST)
+            
+        amount = request.data.get('amount')
+        if not amount:
+             return Response({"error": "Amount is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        bid, created = RideBid.objects.update_or_create(
+            ride=ride,
+            driver=user,
+            defaults={'amount': amount, 'status': 'pending'}
+        )
+        
+        return Response(RideBidSerializer(bid).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'])
+    def accept_bid(self, request, pk=None):
+        ride = self.get_object()
+        user = request.user
+
+        if ride.passenger != user:
+            return Response({"error": "Only the passenger can accept bids"}, status=status.HTTP_403_FORBIDDEN)
+            
+        bid_id = request.data.get('bid_id')
+        try:
+            bid = RideBid.objects.get(id=bid_id, ride=ride)
+        except RideBid.DoesNotExist:
+            return Response({"error": "Bid not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Update Ride
+        ride.driver = bid.driver
+        ride.status = 'accepted'
+        ride.actual_fare = bid.amount
+        ride.save()
+
+        # Update Bids
+        bid.status = 'accepted'
+        bid.save()
+        
+        # Reject other bids (optional, but good practice)
+        RideBid.objects.filter(ride=ride).exclude(id=bid.id).update(status='rejected')
+
         return Response(RideSerializer(ride).data)
 
     @action(detail=True, methods=['post'])

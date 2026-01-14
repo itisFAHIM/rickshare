@@ -2,13 +2,16 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import PassengerDashboard from '../../components/PassengerDashboard';
+import DriverDashboard from '../../components/DriverDashboard';
 
 export default function DashboardPage() {
     const [user, setUser] = useState<any>(null);
     const router = useRouter();
+    const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
-        const token = localStorage.getItem('token');
+        const token = localStorage.getItem('access_token'); // consistent with api.ts
         if (!token) {
             router.push('/login');
             return;
@@ -17,30 +20,39 @@ export default function DashboardPage() {
         if (userData) {
             setUser(JSON.parse(userData));
         }
+        setIsLoading(false);
     }, [router]);
 
+    if (isLoading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
     if (!user) return null;
 
     return (
-        <div className="min-h-screen bg-gray-900 text-white p-8">
-            <h1 className="text-3xl font-bold mb-4">Welcome, {user.username}!</h1>
-            <p className="text-xl text-gray-400">Role: {user.role}</p>
-            <div className="mt-8 p-6 bg-gray-800 rounded-lg">
-                <h2 className="text-2xl font-semibold mb-4">Map Placeholder</h2>
-                <div className="h-64 bg-gray-700 rounded flex items-center justify-center text-gray-500">
-                    Map will be integrated here
+        <div className="min-h-screen bg-gray-50">
+            <nav className="bg-white shadow">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <div className="flex justify-between h-16">
+                        <div className="flex items-center">
+                            <span className="text-2xl font-bold text-black">RickShare</span>
+                        </div>
+                        <div className="flex items-center space-x-4">
+                            <span className="text-gray-700">Welcome, {user.username}</span>
+                            <button
+                                onClick={() => {
+                                    localStorage.removeItem('access_token');
+                                    localStorage.removeItem('refresh_token');
+                                    localStorage.removeItem('user');
+                                    router.push('/login');
+                                }}
+                                className="text-sm text-red-600 hover:text-red-800 font-medium"
+                            >
+                                Logout
+                            </button>
+                        </div>
+                    </div>
                 </div>
-            </div>
-            <button
-                onClick={() => {
-                    localStorage.removeItem('token');
-                    localStorage.removeItem('user');
-                    router.push('/login');
-                }}
-                className="mt-8 bg-red-600 hover:bg-red-500 px-6 py-2 rounded"
-            >
-                Logout
-            </button>
+            </nav>
+
+            {user.role === 'passenger' ? <PassengerDashboard /> : <DriverDashboard />}
         </div>
     );
 }
