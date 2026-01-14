@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import api from "../lib/api";
+import ChatWindow from "./ChatWindow";
 
 // Dynamically import Map to avoid SSR issues with Leaflet
 const Map = dynamic(() => import("./Map"), { ssr: false });
@@ -10,15 +11,16 @@ const Map = dynamic(() => import("./Map"), { ssr: false });
 export default function PassengerDashboard() {
     const [pickup, setPickup] = useState("");
     const [dropoff, setDropoff] = useState("");
-    const [status, setStatus] = useState<"idle" | "estimating" | "estimated" | "requesting" | "requested" | "accepted">("idle");
+    const [status, setStatus] = useState<"idle" | "estimating" | "estimated" | "requesting" | "requested" | "accepted" | "in_progress">("idle");
     const [currentRide, setCurrentRide] = useState<any>(null);
     const [estimate, setEstimate] = useState<any>(null);
 
     const checkRideStatus = async (rideId: number) => {
         try {
             const res = await api.get(`/rides/${rideId}/`);
-            if (res.data.status === 'accepted') {
-                setStatus('accepted');
+            // Update status if it changed, or if we just recovered the ride
+            if (res.data.status !== status) {
+                setStatus(res.data.status);
                 setCurrentRide(res.data);
             }
         } catch (err) {
@@ -26,13 +28,37 @@ export default function PassengerDashboard() {
         }
     };
 
+    // Restore state on active ride finding
+    useEffect(() => {
+        const fetchCurrentRide = async () => {
+            try {
+                const res = await api.get("/rides/");
+                // Find the most recent active ride
+                // Passengers only see their own rides, so filtering by status is enough
+                const active = res.data.find((r: any) => ['requested', 'accepted', 'in_progress'].includes(r.status));
+
+                if (active) {
+                    setCurrentRide(active);
+                    setStatus(active.status);
+                }
+            } catch (err) {
+                console.error("Failed to restore ride state", err);
+            }
+        };
+        fetchCurrentRide();
+    }, []);
+
+    // Polling effect
     useEffect(() => {
         let interval: NodeJS.Timeout;
-        if (status === 'requested' && currentRide) {
+
+        // Poll if we have a ride that is not completed
+        if (currentRide && ['requested', 'accepted', 'in_progress'].includes(status)) {
             interval = setInterval(() => {
                 checkRideStatus(currentRide.id);
-            }, 5000);
+            }, 3000); // Poll every 3s for faster updates
         }
+
         return () => clearInterval(interval);
     }, [status, currentRide]);
 
@@ -178,20 +204,59 @@ export default function PassengerDashboard() {
                         </div>
                     )}
 
-                    {status === 'accepted' && (
-                        <div className="p-6 bg-green-50 border border-green-200 rounded-xl">
-                            <h3 className="text-xl font-bold text-green-800 mb-2">Driver Found!</h3>
-                            <p className="text-gray-800">
-                                <strong>{currentRide?.driver}</strong> is on their way.
-                            </p>
-                            <p className="mt-2 text-sm text-gray-500">Pick up at: {currentRide?.pickup_address}</p>
-                            <div className="mt-4 pt-4 border-t border-green-200 flex justify-between">
-                                <span className="text-green-800 font-medium">Fare</span>
-                                <span className="text-green-800 font-bold">BDT {currentRide?.estimated_fare}</span>
+                    {(status === 'accepted' || status === 'in_progress') && (
+                        <div className="p-6 bg-white border border-gray-200 shadow-xl rounded-xl">
+                            <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                                <span className={`w-3 h-3 rounded-full ${status === 'accepted' ? 'bg-green-500 animate-pulse' : 'bg-blue-500'}`}></span>
+                                {status === 'accepted' ? 'Driver is on the way!' : 'Ride in Progress'}
+                            </h3>
+
+                            <div className="flex items-center space-x-4 mb-6">
+                                <div className="w-12 h-12 bg-gray-200 rounded-full flex items-center justify-center">
+                                    <span className="text-xl">🚗</span>
+                                </div>
+                                <div>
+                                    <p className="font-bold text-lg">{currentRide?.driver}</p>
+                                    <p className="text-sm text-gray-500">Toyota Corolla • DHAKA-GA-1234</p>
+                                </div>
+                            </div>
+
+                            <div className="space-y-4 pt-4 border-t border-gray-100">
+                                <div className="flex justify-between items-center">
+                                    <div>
+                                        <p className="text-xs text-gray-500 uppercase font-bold tracking-wide">Pickup</p>
+                                        <p className="font-medium text-gray-900">{currentRide?.pickup_address}</p>
+                                    </div>
+                                </div>
+
+                                <div className="flex justify-between items-center">
+                                    <div>
+                                        <p className="text-xs text-gray-500 uppercase font-bold tracking-wide">Dropoff</p>
+                                        <p className="font-medium text-gray-900">{currentRide?.dropoff_address}</p>
+                                    </div>
+                                </div>
+
+                                <div className="flex justify-between items-center pt-2">
+                                    <div>
+                                        <p className="text-xs text-gray-500 uppercase font-bold tracking-wide">Estimated Fare</p>
+                                        <p className="text-xl font-bold text-black">BDT {currentRide?.estimated_fare}</p>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-xs text-gray-500 uppercase font-bold tracking-wide">Distance</p>
+                                        <p className="font-medium">{currentRide?.distance_km} km</p>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     )}
                 </div>
+
+                {/* Chat Window */}
+                {(status === 'accepted' || status === 'in_progress') && currentRide && (
+                    <div className="mb-8 lg:mb-0 lg:col-span-1 lg:col-start-1">
+                        <ChatWindow rideId={currentRide.id} currentUserRole="passenger" currentUsername={currentRide.passenger} />
+                    </div>
+                )}
 
                 {/* Right Column: Map */}
                 <div className="relative h-96 md:h-[500px] w-full bg-gray-100 rounded-xl overflow-hidden shadow-lg border border-gray-200">

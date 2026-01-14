@@ -45,3 +45,15 @@ class Ride(models.Model):
 
     def __str__(self):
         return f"Ride #{self.id} ({self.status}) - {self.passenger.username}"
+
+class Message(models.Model):
+    ride = models.ForeignKey(Ride, on_delete=models.CASCADE, related_name='messages')
+    sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    content = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"{self.sender.username}: {self.content[:20]}"

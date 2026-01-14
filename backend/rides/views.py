@@ -1,8 +1,8 @@
 from rest_framework import generics, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from .models import DriverLocation, Ride
-from .serializers import DriverLocationSerializer, RideSerializer
+from .models import DriverLocation, Ride, Message
+from .serializers import DriverLocationSerializer, RideSerializer, MessageSerializer
 from .services import calculate_fare
 
 class DriverLocationView(generics.ListCreateAPIView):
@@ -40,8 +40,8 @@ class RideViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if user.role == 'driver':
             # Drivers see available requests or rides they effectively own (accepted/in-progress)
-            # For MVP: Drivers see all REQUESTED rides + their own ACCEPTED/IN_PROGRESS rides
-            return Ride.objects.filter(status='requested') | Ride.objects.filter(driver=user)
+            # Drivers see available requests OR rides they have accepted/started
+            return Ride.objects.filter(status='requested') | Ride.objects.filter(driver=user, status__in=['accepted', 'in_progress'])
         else:
             # Passengers only see their own rides
             return Ride.objects.filter(passenger=user)
@@ -89,8 +89,72 @@ class RideViewSet(viewsets.ModelViewSet):
         if ride.status != 'requested':
             return Response({"error": "Ride is not available"}, status=status.HTTP_400_BAD_REQUEST)
             
+        # Check if driver already has an active ride
+        active_rides = Ride.objects.filter(driver=user, status__in=['accepted', 'in_progress'])
+        if active_rides.exists():
+            return Response({"error": "You already have an active ride"}, status=status.HTTP_400_BAD_REQUEST)
+
         ride.driver = user
         ride.status = 'accepted'
         ride.save()
         
         return Response(RideSerializer(ride).data)
+
+    @action(detail=True, methods=['post'])
+    def start_ride(self, request, pk=None):
+        ride = self.get_object()
+        user = request.user
+        
+        if user.role != 'driver':
+            return Response({"error": "Only drivers can start rides"}, status=status.HTTP_403_FORBIDDEN)
+            
+        if ride.driver != user:
+             return Response({"error": "You are not the driver for this ride"}, status=status.HTTP_403_FORBIDDEN)
+             
+        if ride.status != 'accepted':
+            return Response({"error": "Ride must be accepted before starting"}, status=status.HTTP_400_BAD_REQUEST)
+            
+        ride.status = 'in_progress'
+        ride.save()
+        
+        return Response(RideSerializer(ride).data)
+
+    @action(detail=True, methods=['post'])
+    def complete_ride(self, request, pk=None):
+        ride = self.get_object()
+        user = request.user
+        
+        if user.role != 'driver':
+            return Response({"error": "Only drivers can complete rides"}, status=status.HTTP_403_FORBIDDEN)
+            
+        if ride.driver != user:
+             return Response({"error": "You are not the driver for this ride"}, status=status.HTTP_403_FORBIDDEN)
+             
+        if ride.status != 'in_progress':
+            return Response({"error": "Ride must be in progress before completing"}, status=status.HTTP_400_BAD_REQUEST)
+            
+        ride.status = 'completed'
+        ride.save()
+        
+        return Response(RideSerializer(ride).data)
+
+    @action(detail=True, methods=['get', 'post'])
+    def messages(self, request, pk=None):
+        ride = self.get_object()
+        user = request.user
+        
+        # Security check: Only participant can view/send
+        if user != ride.passenger and user != ride.driver:
+            return Response({"error": "Not a participant"}, status=status.HTTP_403_FORBIDDEN)
+
+        if request.method == 'GET':
+            messages = ride.messages.all()
+            return Response(MessageSerializer(messages, many=True).data)
+        
+        elif request.method == 'POST':
+            content = request.data.get('content')
+            if not content:
+                return Response({"error": "Content required"}, status=status.HTTP_400_BAD_REQUEST)
+                
+            message = Message.objects.create(ride=ride, sender=user, content=content)
+            return Response(MessageSerializer(message).data, status=status.HTTP_201_CREATED)

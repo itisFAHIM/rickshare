@@ -1,5 +1,13 @@
 from rest_framework import serializers
-from .models import DriverLocation, Ride
+from .models import DriverLocation, Ride, Message
+
+class MessageSerializer(serializers.ModelSerializer):
+    sender = serializers.CharField(source='sender.username', read_only=True)
+    
+    class Meta:
+        model = Message
+        fields = ['id', 'sender', 'content', 'created_at']
+
 
 class DriverLocationSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source='user.username', read_only=True)

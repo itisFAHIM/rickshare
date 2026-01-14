@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import api from "../lib/api";
+import ChatWindow from "./ChatWindow";
 
 // Dynamically import Map to avoid SSR issues with Leaflet
 const Map = dynamic(() => import("./Map"), { ssr: false });
@@ -12,20 +13,26 @@ export default function DriverDashboard() {
     const [simulateLocation, setSimulateLocation] = useState(false);
     const [statusMessage, setStatusMessage] = useState("");
     const [requestedRides, setRequestedRides] = useState<any[]>([]);
+    const [activeRide, setActiveRide] = useState<any>(null);
+
+    const fetchRides = async () => {
+        try {
+            const res = await api.get("/rides/");
+            const allRides = res.data;
+
+            // Separate active ride from requests
+            const active = allRides.find((r: any) => r.status === 'accepted' || r.status === 'in_progress');
+            const requests = allRides.filter((r: any) => r.status === 'requested');
+
+            setActiveRide(active || null);
+            setRequestedRides(requests);
+
+        } catch (err) {
+            console.error("Failed to fetch rides", err);
+        }
+    };
 
     useEffect(() => {
-        const fetchRides = async () => {
-            try {
-                const res = await api.get("/rides/");
-                // Filter for requested rides only for the list (though API might already filter)
-                // We will just show all returned to be safe as per our ViewSet logic (drivers see requested + theirs)
-                const pending = res.data.filter((r: any) => r.status === 'requested');
-                setRequestedRides(pending);
-            } catch (err) {
-                console.error("Failed to fetch rides", err);
-            }
-        };
-
         const interval = setInterval(fetchRides, 5000);
         fetchRides();
 
@@ -36,12 +43,35 @@ export default function DriverDashboard() {
         try {
             await api.patch(`/rides/${rideId}/accept/`);
             setStatusMessage(`Ride #${rideId} accepted!`);
-            // Refresh list immediately
-            const res = await api.get("/rides/");
-            setRequestedRides(res.data.filter((r: any) => r.status === 'requested'));
+            fetchRides();
         } catch (err) {
             console.error("Failed to accept ride", err);
             setStatusMessage("Failed to accept ride.");
+        }
+    };
+
+    const handleStartRide = async () => {
+        if (!activeRide) return;
+        try {
+            await api.post(`/rides/${activeRide.id}/start_ride/`);
+            setStatusMessage("Ride started!");
+            fetchRides();
+        } catch (err) {
+            console.error("Failed to start ride", err);
+            setStatusMessage("Failed to start ride.");
+        }
+    };
+
+    const handleCompleteRide = async () => {
+        if (!activeRide) return;
+        try {
+            await api.post(`/rides/${activeRide.id}/complete_ride/`);
+            setStatusMessage("Ride completed!");
+            setActiveRide(null); // Clear active ride locally immediately
+            fetchRides();
+        } catch (err) {
+            console.error("Failed to complete ride", err);
+            setStatusMessage("Failed to complete ride.");
         }
     };
 
@@ -75,7 +105,7 @@ export default function DriverDashboard() {
                                     longitude,
                                     vehicle_type: "car", // Hardcoded for now, could be from user profile
                                 });
-                                setStatusMessage("Location updated.");
+                                statusMessage === "Location updated." || setStatusMessage("Location updated.");
                             } catch (error) {
                                 console.error("Failed to update location", error);
                                 setStatusMessage("Failed to update location.");
@@ -150,50 +180,109 @@ export default function DriverDashboard() {
                         <p className="text-3xl font-bold text-green-600">$0.00</p>
                     </div>
 
-                    {/* Ride Requests List */}
-                    <div className="bg-white p-6 rounded-xl border border-gray-200">
-                        <h3 className="font-semibold mb-4">Ride Requests ({requestedRides.length})</h3>
-                        <div className="space-y-4 max-h-96 overflow-y-auto">
-                            {requestedRides.length === 0 ? (
-                                <p className="text-gray-500 text-sm">No new requests.</p>
-                            ) : (
-                                requestedRides.map((ride) => (
-                                    <div key={ride.id} className="p-4 bg-gray-50 rounded-lg border border-gray-100">
-                                        <div className="flex justify-between items-start mb-2">
-                                            <span className="font-bold text-sm">Ride #{ride.id}</span>
-                                            <div className="flex flex-col items-end">
-                                                <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full mb-1">
-                                                    {ride.status}
-                                                </span>
-                                                {ride.estimated_fare && (
-                                                    <span className="text-green-600 font-bold text-sm">
-                                                        BDT {ride.estimated_fare}
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </div>
-                                        <p className="text-sm text-gray-600 mb-1">
-                                            <span className="font-medium">Pickup:</span> {ride.pickup_address}
-                                        </p>
-                                        <p className="text-sm text-gray-600 mb-1">
-                                            <span className="font-medium">Dropoff:</span> {ride.dropoff_address}
-                                        </p>
-                                        {ride.distance_km && (
-                                            <p className="text-xs text-gray-500 mb-3">
-                                                Distance: {ride.distance_km} km ({ride.duration_minutes} min)
-                                            </p>
-                                        )}
-                                        <button
-                                            onClick={() => handleAcceptRide(ride.id)}
-                                            className="w-full py-2 bg-black text-white text-sm font-medium rounded hover:bg-gray-800 transition"
-                                        >
-                                            Accept Ride
-                                        </button>
-                                    </div>
-                                ))
+                    {/* Active Ride Card */}
+                    {activeRide && (
+                        <div className="bg-white p-6 rounded-xl border-2 border-green-500 shadow-lg animate-fade-in">
+                            <h3 className="font-bold text-xl mb-4 text-green-700">Current Ride</h3>
+
+                            <div className="space-y-3 mb-6">
+                                <div className="flex justify-between">
+                                    <span className="text-sm font-medium text-gray-500">Passenger</span>
+                                    <span className="text-sm font-bold">{activeRide.passenger}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span className="text-sm font-medium text-gray-500">Status</span>
+                                    <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full font-bold uppercase">
+                                        {activeRide.status.replace('_', ' ')}
+                                    </span>
+                                </div>
+                                <div className="border-t border-gray-100 pt-2">
+                                    <p className="text-sm text-gray-500">Pickup</p>
+                                    <p className="font-medium text-gray-900">{activeRide.pickup_address}</p>
+                                </div>
+                                <div>
+                                    <p className="text-sm text-gray-500">Dropoff</p>
+                                    <p className="font-medium text-gray-900">{activeRide.dropoff_address}</p>
+                                </div>
+                                <div className="flex justify-between items-center pt-2">
+                                    <span className="text-gray-500">Fare</span>
+                                    <span className="text-xl font-bold text-black">BDT {activeRide.estimated_fare}</span>
+                                </div>
+                            </div>
+
+                            {activeRide.status === 'accepted' && (
+                                <button
+                                    onClick={handleStartRide}
+                                    className="w-full py-3 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 transition"
+                                >
+                                    Start Ride
+                                </button>
+                            )}
+
+                            {activeRide.status === 'in_progress' && (
+                                <button
+                                    onClick={handleCompleteRide}
+                                    className="w-full py-3 bg-black text-white font-bold rounded-lg hover:bg-gray-800 transition"
+                                >
+                                    Complete Ride
+                                </button>
                             )}
                         </div>
-                    </div>
+                    )}
+
+                    {/* Active Ride Chat */}
+                    {activeRide && (
+                        <div className="mt-6">
+                            <ChatWindow rideId={activeRide.id} currentUserRole="driver" currentUsername={activeRide.driver} />
+                        </div>
+                    )}
+
+                    {/* Ride Requests List */}
+                    {!activeRide && (
+                        <div className="bg-white p-6 rounded-xl border border-gray-200">
+                            <h3 className="font-semibold mb-4">Ride Requests ({requestedRides.length})</h3>
+                            <div className="space-y-4 max-h-96 overflow-y-auto">
+                                {requestedRides.length === 0 ? (
+                                    <p className="text-gray-500 text-sm">No new requests.</p>
+                                ) : (
+                                    requestedRides.map((ride) => (
+                                        <div key={ride.id} className="p-4 bg-gray-50 rounded-lg border border-gray-100">
+                                            <div className="flex justify-between items-start mb-2">
+                                                <span className="font-bold text-sm">Ride #{ride.id}</span>
+                                                <div className="flex flex-col items-end">
+                                                    <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full mb-1">
+                                                        {ride.status}
+                                                    </span>
+                                                    {ride.estimated_fare && (
+                                                        <span className="text-green-600 font-bold text-sm">
+                                                            BDT {ride.estimated_fare}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <p className="text-sm text-gray-600 mb-1">
+                                                <span className="font-medium">Pickup:</span> {ride.pickup_address}
+                                            </p>
+                                            <p className="text-sm text-gray-600 mb-1">
+                                                <span className="font-medium">Dropoff:</span> {ride.dropoff_address}
+                                            </p>
+                                            {ride.distance_km && (
+                                                <p className="text-xs text-gray-500 mb-3">
+                                                    Distance: {ride.distance_km} km ({ride.duration_minutes} min)
+                                                </p>
+                                            )}
+                                            <button
+                                                onClick={() => handleAcceptRide(ride.id)}
+                                                className="w-full py-2 bg-black text-white text-sm font-medium rounded hover:bg-gray-800 transition"
+                                            >
+                                                Accept Ride
+                                            </button>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Map Area */}
